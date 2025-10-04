@@ -1,0 +1,57 @@
+---
+networks:
+  codebase-search:
+volumes:
+  codebase-search-db:
+services:
+  codebase-search-db:
+    # Postgres with pgvector extension
+    image: pgvector/pgvector:pg18-trixie
+    env_file: .env
+    healthcheck:
+      test: [ 'CMD', 'pg_isready', '-U', '$POSTGRES_USER', '-d', '$POSTGRES_DB' ]
+      interval: 300s
+      start_period: 30s
+    networks:
+      - 'codebase-search'
+    # Exposed so that the codebase_indexer.py and search_codebase.py can connect.
+    ports:
+      - '127.0.0.1:5432:5432'
+    restart: unless-stopped
+    stop_grace_period: 60s
+    volumes:
+      - 'codebase-search-db:/var/lib/postgresql/data'
+
+  codebase-search-mcp:
+    build:
+      context: '.'
+    command: [ 'python', 'mcp_server.py', '--project=/project' ]
+    depends_on:
+      - codebase-search-db
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # Allow sentence-transformers to access a GPU.
+            # Speeds up transforming queries into embedding vectors.
+            - count: all
+              capabilities: [ gpu ]
+    env_file: .env
+    environment:
+      DB_HOST: 'codebase-search-db'
+      DB_PORT: 5432
+      FASTMCP_HOST: 0.0.0.0
+    ipc: 'host'
+    networks:
+      - 'codebase-search'
+    ports:
+      - '127.0.0.1:8111:8111'
+    restart: 'no'
+    stop_grace_period: 60s
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack: 67108864
+    volumes:
+      - '$HOST_PROJECT_ROOT:/project'
